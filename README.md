@@ -21,7 +21,7 @@ Lycée Français de Barcelone
 
 ## Experience
 
-**Software Developer — Publicis Sapient · Internship ** *(Jun 2022 - jul 2022)*  
+**Software Developer — Publicis Sapient · Internship ** *(Jun 2022 - jul 2022)**  
 London Area, United Kingdom 
 
 I shadowed a Python programmer during the layout of a website of a supermarket and worked with a graphic designer, creating the design of a poster to inform employees about events in the office using Figma.
@@ -41,7 +41,7 @@ I shadowed a Python programmer during the layout of a website of a supermarket a
 - Artificial Intelligence & Machine Learning
 - Computer Vision
 - Software Development
-- Digital Asset Management (DAM)
+- UI / UX
 
 **Tools & Platforms**
 - Git & GitHub
