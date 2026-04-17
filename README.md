@@ -1,4 +1,4 @@
-# Hi, I'm Eloise Hurst 👋
+# Eloise Hurst 👋
 
 **Computer Science (Artificial Intelligence) student at Edinburgh Napier University**  
 Passionate about AI, machine learning, and building things that solve real problems.
@@ -7,9 +7,7 @@ Passionate about AI, machine learning, and building things that solve real probl
 
 ## About Me
 
-I'm a CS student specialising in Artificial Intelligence, currently in the final stages of my degree at Edinburgh Napier University. I'm interested in the intersection of AI and real-world applications — particularly how intelligent systems can be built into products people actually use.
-
-In May 2026 I'm joining **Wedia** (Paris) as an AI department intern, where I'll be researching how AI can predict the marketing performance of visual content before publication, and how AI-generated content can be made more reliable at enterprise scale.
+I'm a Computer Science student specialising in Artificial Intelligence, currently in the my second year of my degree at Edinburgh Napier University. I'm interested in the intersection of AI and real-world applications particularly how intelligent systems can be built into products people actually use.
 
 ---
 
@@ -18,6 +16,10 @@ In May 2026 I'm joining **Wedia** (Paris) as an AI department intern, where I'll
 **BSc Computer Science (Artificial Intelligence)**  
 Edinburgh Napier University  
 *Expected graduation: 2026*
+
+**French Baccalaureate ( Maths, Computer Science, English) **  
+Lycée Français de Barcelone  
+*Mention Bien - high honors distinction*
 
 ---
 
@@ -48,42 +50,14 @@ Wedia is France's leading Digital Asset Management (DAM) platform. During my int
 
 **Tools & Platforms**
 - Git & GitHub
-- VS Code
+- VS Code / Cursor / Antigarvity
 - Obsidian
 
----
-
-## 🚀 Projects
-
-### 🎮 Connect 4 — Python Console Game
-A fully playable console-based Connect 4 game built in Python with four difficulty levels and unique mechanics per level.
-
-**Features:**
-- 4 levels: Easy, Medium, Hard, and Bonus
-- Time-based mechanics — turn timers, grid shrinking, token swaps
-- Undo/Redo system using a two-stack history pattern
-- Double-drop power-up for each player
-- Pure Python standard library — no external dependencies
-
-**Tech:** Python · `time` · `random`  
-[View Project →](./connect-4/index.py)
 
 ---
 
-### 🧮 Calculator — Web Calculator
-A clean web-based calculator built with vanilla HTML, CSS, and JavaScript.
+## Contact
 
-**Tech:** HTML · CSS · JavaScript  
-[View Project →](./calculator/)
+- [eloisehurst39@gmail.com](mailto:eloisehurst39@gmail.com)
+- [LinkedIn](https://www.linkedin.com/in/eloise-hurst-617b1a2b7/) 
 
----
-
-*More projects coming soon.*
-
----
-
-## 📫 Contact
-
-- 📧 [eloisehurst39@gmail.com](mailto:eloisehurst39@gmail.com)
-- 💼 [LinkedIn](https://linkedin.com/in/your-username) ← *update this link*
-- 🐙 [GitHub](https://github.com/eloiseehurstt39-pix)
