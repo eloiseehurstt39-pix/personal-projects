@@ -13,7 +13,7 @@ I'm interested in the intersection of AI and real-world applications particularl
 Edinburgh Napier University  
 *Expected graduation: 2026*
 
-**French Baccalaureate ( Maths, Computer Science, English) **  
+**French Baccalaureate ( Maths, Computer Science, English)**  
 Lycée Français de Barcelone  
 *Mention Bien - high honors distinction*
 
