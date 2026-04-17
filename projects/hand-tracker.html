@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Gesture Tracker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+    #container { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+    video { position: absolute; opacity: 0; pointer-events: none; }
+    canvas { display: block; }
+    #status {
+      position: fixed;
+      top: 20px; left: 20px;
+      color: #00f5ff;
+      font-size: 0.75rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-shadow: 0 0 10px #00f5ff;
+      pointer-events: none;
+      line-height: 1.8;
+    }
+    #gesture {
+      position: fixed;
+      top: 20px; right: 20px;
+      color: #ff00ff;
+      font-size: 0.75rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-shadow: 0 0 10px #ff00ff;
+      text-align: right;
+      pointer-events: none;
+    }
+    #loading {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #00f5ff;
+      font-family: 'Courier New', monospace;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      z-index: 100;
+    }
+    #loading .bar {
+      margin-top: 20px;
+      width: 200px;
+      height: 2px;
+      background: #0a1a2a;
+      position: relative;
+      overflow: hidden;
+    }
+    #loading .bar::after {
+      content: '';
+      position: absolute;
+      left: -40%;
+      width: 40%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, #00f5ff, transparent);
+      animation: sweep 1.2s linear infinite;
+    }
+    @keyframes sweep { to { left: 140%; } }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div>INITIALIZING HAND TRACKER</div>
+  <div class="bar"></div>
+</div>
+
+<div id="container">
+  <video id="video" playsinline></video>
+  <canvas id="canvas"></canvas>
+</div>
+
+<div id="status">
+  <div>● TRACKING ACTIVE</div>
+  <div id="hand-count">HANDS: 0</div>
+</div>
+<div id="gesture">—</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const gestureEl = document.getElementById('gesture');
+const handCountEl = document.getElementById('hand-count');
+const loadingEl = document.getElementById('loading');
+
+// Resize canvas to fill window
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ---- Finger landmark indices ----
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],       // thumb
+  [0,5],[5,6],[6,7],[7,8],       // index
+  [0,9],[9,10],[10,11],[11,12],  // middle
+  [0,13],[13,14],[14,15],[15,16],// ring
+  [0,17],[17,18],[18,19],[19,20],// pinky
+  [5,9],[9,13],[13,17]           // palm
+];
+
+const FINGER_COLORS = {
+  thumb:  '#00f5ff',
+  index:  '#ff00ff',
+  middle: '#00ff88',
+  ring:   '#ff8800',
+  pinky:  '#aa44ff',
+  palm:   '#ffffff',
+};
+
+function landmarkColor(i) {
+  if (i <= 4)  return FINGER_COLORS.thumb;
+  if (i <= 8)  return FINGER_COLORS.index;
+  if (i <= 12) return FINGER_COLORS.middle;
+  if (i <= 16) return FINGER_COLORS.ring;
+  if (i <= 20) return FINGER_COLORS.pinky;
+  return FINGER_COLORS.palm;
+}
+
+// ---- Particle system ----
+const particles = [];
+const FINGERTIPS = [4, 8, 12, 16, 20];
+
+function addParticles(x, y, color) {
+  for (let i = 0; i < 2; i++) {
+    particles.push({
+      x: x + (Math.random() - 0.5) * 6,
+      y: y + (Math.random() - 0.5) * 6,
+      vx: (Math.random() - 0.5) * 1.5,
+      vy: (Math.random() - 0.5) * 1.5 - 0.5,
+      alpha: 0.8,
+      size: Math.random() * 3 + 1,
+      color,
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.alpha -= 0.03;
+    if (p.alpha <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.alpha;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = p.color;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ---- Gesture detection ----
+function detectGesture(lm) {
+  const tips  = [8, 12, 16, 20];
+  const mids  = [6, 10, 14, 18];
+  let extended = 0;
+  for (let i = 0; i < tips.length; i++) {
+    if (lm[tips[i]].y < lm[mids[i]].y) extended++;
+  }
+  if (extended === 4) return 'OPEN HAND';
+  if (extended === 0) return 'FIST';
+  if (extended === 1 && lm[8].y < lm[6].y) return 'POINTING';
+  if (extended === 2 && lm[8].y < lm[6].y && lm[12].y < lm[10].y) return 'PEACE';
+  return 'GESTURE';
+}
+
+// ---- Shape overlay ----
+function drawShapeOverlay(lm, gesture) {
+  const xs = lm.map(p => p.x * canvas.width);
+  const ys = lm.map(p => p.y * canvas.height);
+  const cx = xs.reduce((a,b) => a+b) / xs.length;
+  const cy = ys.reduce((a,b) => a+b) / ys.length;
+  const maxR = Math.max(...xs.map((x,i) => Math.hypot(x-cx, ys[i]-cy)));
+
+  ctx.save();
+  ctx.strokeStyle = gesture === 'FIST' ? '#ff00ff' : '#00f5ff';
+  ctx.shadowBlur = 20;
+  ctx.shadowColor = ctx.strokeStyle;
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.5;
+
+  if (gesture === 'FIST') {
+    ctx.beginPath();
+    ctx.arc(cx, cy, maxR * 1.15, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    const sides = gesture === 'PEACE' ? 3 : 6;
+    ctx.beginPath();
+    for (let i = 0; i < sides; i++) {
+      const angle = (i / sides) * Math.PI * 2 - Math.PI / 2;
+      const px = cx + Math.cos(angle) * maxR * 1.2;
+      const py = cy + Math.sin(angle) * maxR * 1.2;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // rotating inner ring
+    const t = Date.now() / 1000;
+    ctx.globalAlpha = 0.25;
+    ctx.beginPath();
+    for (let i = 0; i < sides; i++) {
+      const angle = (i / sides) * Math.PI * 2 + t;
+      const px = cx + Math.cos(angle) * maxR * 0.7;
+      const py = cy + Math.sin(angle) * maxR * 0.7;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---- Draw one hand ----
+function drawHand(lm) {
+  const W = canvas.width, H = canvas.height;
+
+  // Skeleton lines
+  for (const [a, b] of CONNECTIONS) {
+    const x1 = lm[a].x * W, y1 = lm[a].y * H;
+    const x2 = lm[b].x * W, y2 = lm[b].y * H;
+    const color = landmarkColor(a);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = color;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Landmark dots
+  for (let i = 0; i < lm.length; i++) {
+    const x = lm[i].x * W, y = lm[i].y * H;
+    const color = landmarkColor(i);
+    const isTip = FINGERTIPS.includes(i);
+    const r = isTip ? 7 : 4;
+
+    // Particle trails on fingertips
+    if (isTip) addParticles(x, y, color);
+
+    ctx.save();
+    ctx.shadowBlur = isTip ? 20 : 12;
+    ctx.shadowColor = color;
+    // outer glow ring
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
+    ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+    ctx.stroke();
+    // filled dot
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    // white core
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ---- Scanline overlay ----
+function drawScanlines() {
+  ctx.save();
+  ctx.globalAlpha = 0.04;
+  ctx.fillStyle = '#000';
+  for (let y = 0; y < canvas.height; y += 4) {
+    ctx.fillRect(0, y, canvas.width, 2);
+  }
+  ctx.restore();
+}
+
+// ---- HUD corners ----
+let hue = 0;
+function drawHUD() {
+  hue = (hue + 0.3) % 360;
+  const color = `hsl(${hue}, 100%, 60%)`;
+  const s = 22;
+  const pad = 16;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = color;
+  ctx.globalAlpha = 0.7;
+
+  // Top-left
+  ctx.beginPath(); ctx.moveTo(pad+s, pad); ctx.lineTo(pad, pad); ctx.lineTo(pad, pad+s); ctx.stroke();
+  // Top-right
+  ctx.beginPath(); ctx.moveTo(canvas.width-pad-s, pad); ctx.lineTo(canvas.width-pad, pad); ctx.lineTo(canvas.width-pad, pad+s); ctx.stroke();
+  // Bottom-left
+  ctx.beginPath(); ctx.moveTo(pad+s, canvas.height-pad); ctx.lineTo(pad, canvas.height-pad); ctx.lineTo(pad, canvas.height-pad-s); ctx.stroke();
+  // Bottom-right
+  ctx.beginPath(); ctx.moveTo(canvas.width-pad-s, canvas.height-pad); ctx.lineTo(canvas.width-pad, canvas.height-pad); ctx.lineTo(canvas.width-pad, canvas.height-pad-s); ctx.stroke();
+
+  ctx.restore();
+}
+
+// ---- Main render callback ----
+let lastGesture = '—';
+
+function onResults(results) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Dark background with fade (keeps particle trails visible briefly)
+  ctx.fillStyle = 'rgba(0, 2, 10, 0.85)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  updateParticles();
+  drawParticles();
+  drawScanlines();
+  drawHUD();
+
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    handCountEl.textContent = `HANDS: ${results.multiHandLandmarks.length}`;
+    const gestures = [];
+    for (const lm of results.multiHandLandmarks) {
+      const g = detectGesture(lm);
+      gestures.push(g);
+      drawShapeOverlay(lm, g);
+      drawHand(lm);
+    }
+    lastGesture = gestures.join(' / ');
+  } else {
+    handCountEl.textContent = 'HANDS: 0';
+    lastGesture = '— NO HAND DETECTED';
+  }
+
+  gestureEl.textContent = lastGesture;
+}
+
+// ---- Init MediaPipe ----
+const hands = new Hands({
+  locateFile: (file) =>
+    `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
+});
+
+hands.setOptions({
+  maxNumHands: 2,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.6,
+});
+
+hands.onResults(onResults);
+
+const camera = new Camera(video, {
+  onFrame: async () => {
+    await hands.send({ image: video });
+  },
+  width: 1280,
+  height: 720,
+  facingMode: 'user',
+});
+
+camera.start().then(() => {
+  loadingEl.style.display = 'none';
+}).catch(err => {
+  loadingEl.innerHTML = `<div style="color:#ff4444">CAMERA ACCESS DENIED</div><div style="font-size:0.7rem;margin-top:10px;color:#888">Please allow camera permissions and reload.</div>`;
+  console.error(err);
+});
+</script>
+</body>
+</html>

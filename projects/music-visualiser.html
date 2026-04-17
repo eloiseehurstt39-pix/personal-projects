@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Music Visualizer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+    canvas { display: block; cursor: default; }
+
+    #start-screen {
+      position: fixed; inset: 0; background: #000;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 1.5rem; z-index: 50;
+    }
+    #start-screen h1 {
+      color: #fff; font-size: 1.6rem; letter-spacing: 6px;
+      text-transform: uppercase; text-shadow: 0 0 20px #a855f7;
+    }
+    #start-screen p {
+      color: #555; font-size: 0.72rem; letter-spacing: 2px;
+      text-align: center; max-width: 320px; line-height: 2;
+    }
+    .btn-row { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+    .btn {
+      padding: 0.7rem 1.8rem; font-family: 'Courier New', monospace;
+      font-size: 0.78rem; letter-spacing: 2px; text-transform: uppercase;
+      cursor: pointer; border-radius: 4px; transition: all 0.2s; border: 1px solid;
+      background: transparent;
+    }
+    .btn-mic  { color: #a855f7; border-color: #a855f7; }
+    .btn-mic:hover  { background: #a855f722; box-shadow: 0 0 20px #a855f744; }
+    .btn-file { color: #00f5ff; border-color: #00f5ff; }
+    .btn-file:hover { background: #00f5ff22; box-shadow: 0 0 20px #00f5ff44; }
+    #file-input { display: none; }
+
+    #hint {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.18); font-size: 0.62rem; letter-spacing: 2px;
+      text-transform: uppercase; pointer-events: none; white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+
+<div id="start-screen">
+  <h1>Music Visualizer</h1>
+  <p>Microphone picks up any music playing.<br>Or upload an audio file directly.</p>
+  <div class="btn-row">
+    <button class="btn btn-mic"  id="btn-mic">Use Microphone</button>
+    <button class="btn btn-file" id="btn-file">Upload Audio File</button>
+  </div>
+  <input type="file" id="file-input" accept="audio/*">
+</div>
+
+<canvas id="canvas"></canvas>
+<div id="hint">Reacting to the beat</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// ── Audio ──────────────────────────────────────────────────────────────────
+let analyser, freqData, waveData, audioCtx;
+
+function boot(source, connectOutput = false) {
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.75;
+  source.connect(analyser);
+  if (connectOutput) analyser.connect(audioCtx.destination); // file only, muted for mic
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+  waveData = new Uint8Array(analyser.fftSize);
+  document.getElementById('start-screen').style.display = 'none';
+  requestAnimationFrame(draw);
+}
+
+document.getElementById('btn-mic').onclick = async () => {
+  audioCtx = new AudioContext();
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  boot(audioCtx.createMediaStreamSource(stream), false); // never plays back mic
+};
+
+document.getElementById('btn-file').onclick = () => document.getElementById('file-input').click();
+document.getElementById('file-input').onchange = async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  audioCtx = new AudioContext();
+  const src = audioCtx.createBufferSource();
+  src.buffer = await audioCtx.decodeAudioData(await file.arrayBuffer());
+  src.loop = true;
+  src.start(0);
+  boot(src, false); // silent — visuals only
+};
+
+// ── Beat detection ─────────────────────────────────────────────────────────
+const bassHist = [];
+let isBeat = false, beatCooldown = 0, beatFlash = 0, globalHue = 220;
+let shakeX = 0, shakeY = 0;
+
+function detectBeat() {
+  const end = Math.floor(analyser.frequencyBinCount * 0.07);
+  let e = 0;
+  for (let i = 0; i < end; i++) e += freqData[i];
+  e /= end;
+  bassHist.push(e);
+  if (bassHist.length > 50) bassHist.shift();
+  const avg = bassHist.reduce((a,b)=>a+b,0) / bassHist.length;
+  if (beatCooldown > 0) { beatCooldown--; isBeat = false; return e; }
+  isBeat = e > avg * 1.35 && e > 65;
+  if (isBeat) {
+    beatFlash = 1;
+    beatCooldown = 7;
+    shakeX = (Math.random()-0.5) * 14;
+    shakeY = (Math.random()-0.5) * 14;
+    onBeat(e);
+  }
+  return e;
+}
+
+// ── Beat explosion — fires every detected beat ─────────────────────────────
+function onBeat(energy) {
+  const W = canvas.width, H = canvas.height;
+  // Big center burst
+  burst(W/2, H/2, 80, globalHue, 2.5);
+  // 4 corner bursts
+  burst(0,   0,   40, globalHue + 40,  2);
+  burst(W,   0,   40, globalHue + 80,  2);
+  burst(0,   H,   40, globalHue + 120, 2);
+  burst(W,   H,   40, globalHue + 160, 2);
+  // Random scatter bursts
+  for (let i = 0; i < 5; i++) {
+    burst(Math.random()*W, Math.random()*H, 30, globalHue + Math.random()*180, 1.8);
+  }
+  // Orb explosion — many at once
+  for (let i = 0; i < 8; i++) spawnOrb(energy);
+  // Starburst lines
+  for (let i = 0; i < 12; i++) {
+    const a = (i/12) * Math.PI * 2;
+    starbursts.push({
+      x: W/2, y: H/2,
+      angle: a,
+      len: 0,
+      maxLen: 80 + Math.random() * (energy * 1.5),
+      alpha: 1,
+      hue: globalHue + i * 15,
+      speed: 18 + Math.random() * 10,
+    });
+  }
+}
+
+// ── Starbursts ─────────────────────────────────────────────────────────────
+const starbursts = [];
+
+function tickStarbursts() {
+  for (let i = starbursts.length-1; i >= 0; i--) {
+    const s = starbursts[i];
+    s.len += s.speed;
+    s.alpha = 1 - s.len / s.maxLen;
+    if (s.alpha <= 0) starbursts.splice(i, 1);
+  }
+}
+
+function drawStarbursts() {
+  for (const s of starbursts) {
+    ctx.save();
+    ctx.globalAlpha = s.alpha * 0.9;
+    ctx.strokeStyle = `hsl(${s.hue},100%,75%)`;
+    ctx.shadowBlur = 20; ctx.shadowColor = ctx.strokeStyle;
+    ctx.lineWidth = 2 * s.alpha;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(s.x + Math.cos(s.angle) * s.len, s.y + Math.sin(s.angle) * s.len);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ── Particles ──────────────────────────────────────────────────────────────
+const particles = [];
+
+function burst(x, y, count, hue, speed = 1) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = (Math.random() * 5 + 1.5) * speed;
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      alpha: 1,
+      size: Math.random() * 4 + 1,
+      hue: hue + (Math.random()-0.5)*50,
+      decay: 0.012 + Math.random()*0.015,
+    });
+  }
+}
+
+function tickParticles() {
+  for (let i = particles.length-1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.06; p.vx *= 0.99;
+    p.alpha -= p.decay;
+    if (p.alpha <= 0) particles.splice(i,1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = `hsl(${p.hue},100%,65%)`;
+    ctx.shadowBlur = 8; ctx.shadowColor = ctx.fillStyle;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ── Full-screen frequency bars (all 4 sides) ──────────────────────────────
+function drawBars(energy) {
+  const W = canvas.width, H = canvas.height;
+  const bins = Math.min(analyser.frequencyBinCount, 256);
+
+  // ── Bottom: bars rising up ──
+  const bw = W / bins;
+  for (let i = 0; i < bins; i++) {
+    const amp = freqData[i] / 255;
+    const bh  = amp * H * 0.9;
+    const hue = globalHue + (i / bins) * 160;
+    const x   = i * bw;
+    const g   = ctx.createLinearGradient(0, H, 0, H - bh);
+    g.addColorStop(0, `hsla(${hue},100%,50%,1)`);
+    g.addColorStop(1, `hsla(${hue+40},100%,80%,0.2)`);
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.shadowBlur = amp > 0.55 ? 22 : 7;
+    ctx.shadowColor = `hsl(${hue},100%,60%)`;
+    ctx.fillRect(x, H - bh, bw - 1, bh);
+    ctx.restore();
+    if (isBeat && amp > 0.55 && Math.random() < 0.3)
+      burst(x + bw/2, H - bh, 10, hue, 1.8);
+  }
+
+  // ── Top: bars dropping down ──
+  for (let i = 0; i < bins; i++) {
+    const amp = freqData[i] / 255;
+    const bh  = amp * H * 0.9;
+    const hue = globalHue + 60 + (i / bins) * 160;
+    const x   = i * bw;
+    const g   = ctx.createLinearGradient(0, 0, 0, bh);
+    g.addColorStop(0, `hsla(${hue},100%,50%,1)`);
+    g.addColorStop(1, `hsla(${hue+40},100%,80%,0.2)`);
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.shadowBlur = amp > 0.55 ? 22 : 7;
+    ctx.shadowColor = `hsl(${hue},100%,60%)`;
+    ctx.fillRect(x, 0, bw - 1, bh);
+    ctx.restore();
+    if (isBeat && amp > 0.55 && Math.random() < 0.3)
+      burst(x + bw/2, bh, 10, hue, 1.8);
+  }
+
+  // ── Left: bars going right ──
+  const bh2 = H / bins;
+  for (let i = 0; i < bins; i++) {
+    const amp = freqData[i] / 255;
+    const bw2 = amp * W * 0.9;
+    const hue = globalHue + 120 + (i / bins) * 160;
+    const y   = i * bh2;
+    const g   = ctx.createLinearGradient(0, 0, bw2, 0);
+    g.addColorStop(0, `hsla(${hue},100%,50%,1)`);
+    g.addColorStop(1, `hsla(${hue+40},100%,80%,0.2)`);
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.shadowBlur = amp > 0.55 ? 22 : 7;
+    ctx.shadowColor = `hsl(${hue},100%,60%)`;
+    ctx.fillRect(0, y, bw2, bh2 - 1);
+    ctx.restore();
+    if (isBeat && amp > 0.55 && Math.random() < 0.3)
+      burst(bw2, y + bh2/2, 10, hue, 1.8);
+  }
+
+  // ── Right: bars going left ──
+  for (let i = 0; i < bins; i++) {
+    const amp = freqData[i] / 255;
+    const bw2 = amp * W * 0.9;
+    const hue = globalHue + 180 + (i / bins) * 160;
+    const y   = i * bh2;
+    const g   = ctx.createLinearGradient(W, 0, W - bw2, 0);
+    g.addColorStop(0, `hsla(${hue},100%,50%,1)`);
+    g.addColorStop(1, `hsla(${hue+40},100%,80%,0.2)`);
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.shadowBlur = amp > 0.55 ? 22 : 7;
+    ctx.shadowColor = `hsl(${hue},100%,60%)`;
+    ctx.fillRect(W - bw2, y, bw2, bh2 - 1);
+    ctx.restore();
+    if (isBeat && amp > 0.55 && Math.random() < 0.3)
+      burst(W - bw2, y + bh2/2, 10, hue, 1.8);
+  }
+}
+
+// ── Full-width waveform ────────────────────────────────────────────────────
+function drawWaveform() {
+  analyser.getByteTimeDomainData(waveData);
+  const W = canvas.width, H = canvas.height;
+  const mid = H * 0.5;
+  const sliceW = W / waveData.length;
+
+  ctx.save();
+  ctx.lineWidth = isBeat ? 3 : 1.5;
+  ctx.strokeStyle = `hsl(${globalHue + 90},100%,70%)`;
+  ctx.shadowBlur = isBeat ? 24 : 10;
+  ctx.shadowColor = ctx.strokeStyle;
+  ctx.globalAlpha = 0.7;
+  ctx.beginPath();
+
+  for (let i = 0; i < waveData.length; i++) {
+    const v = waveData[i] / 128 - 1;
+    const x = i * sliceW;
+    const y = mid + v * H * 0.25;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ── Floating energy orbs (beat-spawned) ───────────────────────────────────
+const orbs = [];
+let orbTimer = 0;
+
+function spawnOrb(energy) {
+  orbs.push({
+    x: Math.random() * canvas.width,
+    y: canvas.height + 20,
+    vy: -(1.5 + Math.random() * 2),
+    r: 8 + energy * 0.2,
+    hue: globalHue + Math.random() * 80 - 40,
+    alpha: 0.8,
+  });
+}
+
+function tickOrbs() {
+  for (let i = orbs.length-1; i >= 0; i--) {
+    const o = orbs[i];
+    o.y += o.vy;
+    o.alpha -= 0.006;
+    o.r *= 0.995;
+    if (o.alpha <= 0 || o.y < -20) orbs.splice(i,1);
+  }
+}
+
+function drawOrbs() {
+  for (const o of orbs) {
+    const g = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.r);
+    g.addColorStop(0, `hsla(${o.hue},100%,90%,${o.alpha})`);
+    g.addColorStop(0.5, `hsla(${o.hue},100%,55%,${o.alpha*0.5})`);
+    g.addColorStop(1, `hsla(${o.hue},100%,30%,0)`);
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.shadowBlur = 20; ctx.shadowColor = `hsl(${o.hue},100%,60%)`;
+    ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ── Beat flash across whole screen ────────────────────────────────────────
+function drawBeatFlash() {
+  if (beatFlash <= 0.01) return;
+  ctx.save();
+  // bright white snap then color wash
+  ctx.fillStyle = `hsla(0,0%,100%,${beatFlash * 0.18})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = `hsla(${globalHue},100%,70%,${beatFlash * 0.22})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  beatFlash *= 0.68;
+  ctx.restore();
+}
+
+// ── HUD corners ───────────────────────────────────────────────────────────
+function drawCorners() {
+  const c = `hsla(${globalHue},100%,65%,0.35)`;
+  const s = 22, p = 14;
+  const W = canvas.width, H = canvas.height;
+  ctx.save();
+  ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+  ctx.shadowBlur = 6; ctx.shadowColor = c;
+  [[p,p,1,1],[W-p,p,-1,1],[p,H-p,1,-1],[W-p,H-p,-1,-1]].forEach(([x,y,dx,dy]) => {
+    ctx.beginPath(); ctx.moveTo(x+dx*s,y); ctx.lineTo(x,y); ctx.lineTo(x,y+dy*s); ctx.stroke();
+  });
+  ctx.restore();
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────
+function draw() {
+  requestAnimationFrame(draw);
+  if (!analyser) return;
+
+  analyser.getByteFrequencyData(freqData);
+  const energy = detectBeat();
+
+  // Hue drift
+  globalHue = (globalHue + 0.3 + (isBeat ? 1.5 : 0)) % 360;
+
+  // Screen shake — decay
+  shakeX *= 0.75; shakeY *= 0.75;
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+
+  // Background — slow fade keeps trails
+  ctx.fillStyle = `rgba(0,0,6,${isBeat ? 0.4 : 0.18})`;
+  ctx.fillRect(-20, -20, canvas.width+40, canvas.height+40);
+
+  drawBeatFlash();
+  drawBars(energy);
+  drawWaveform();
+
+  // Spawn orbs regularly too
+  orbTimer++;
+  if (orbTimer % 25 === 0) { spawnOrb(energy); orbTimer = 0; }
+
+  tickOrbs();       drawOrbs();
+  tickStarbursts(); drawStarbursts();
+  tickParticles();  drawParticles();
+  drawCorners();
+  ctx.restore();
+}
+</script>
+</body>
+</html>
